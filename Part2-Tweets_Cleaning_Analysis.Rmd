@@ -1,0 +1,449 @@
+---
+title: "Text Mining of tweets for RELIANCE"
+author: "WSMA-Group2"
+date: "June 30, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Workflow for text analysis of tweets data for Reliance
+* Load the tweets data from csv file ( as downloaded using Tweepy package in python)
+* Cleaning of tweets data
+* Frequent term analysis 
+* Word Cloud analysis
+* bi-gram analysis
+* Dendrogram & distance matrix analysis
+* Topic Modeling using LDA technique
+* Sentiment analysis ( emotions & polarity)
+
+## Setting the R environment 
+Loading the required packages
+
+```{r, results='hide',warning=FALSE,message=FALSE}
+library(data.table)
+library(dplyr)
+library(TTR)
+library(SnowballC)
+library(tm)
+library(ggplot2)
+library(RColorBrewer)
+library(wordcloud)
+library(topicmodels)
+library(data.table)
+library(stringi)
+library(qdap)
+library(dplyr)
+library(rJava)
+library(sentiment)
+library(dendextend)
+library(RWeka)
+```
+
+Setting the working directory
+
+```{r }
+setwd("C:/Users/user/Documents/GL-Classes/residency 11/WSMA/GA")
+getwd()
+```
+
+## Loading the tweets data 
+Tweets data for 1000 tweets of Reliance as downloaded using python library is loaded into R for further cleaning and analysis
+```{r}
+tweets.df <- read.csv("reliance_tweets.csv",header = FALSE)
+```
+
+## Text Pre-Processing
+In this section, we will carry out necessary steps to clean the tweets text and make it ready for analysis. 
+
+### Remove character string between < >
+
+```{r}
+tweets.df$Tweet <- genX(tweets.df$V2, " <", ">")
+
+
+```
+### Convert tweets data into corpus
+```{r}
+myCorpus<- VCorpus(VectorSource(tweets.df$Tweet))
+myCorpus
+
+```
+### Print some random tweets on the console
+```{r}
+myCorpus[[10]][1]
+myCorpus[[110]][1]
+myCorpus[[500]][1]
+```
+### Define custom function for text cleaning
+Define custom function clean_corpus() which takes one argument, corpus, and applies a series of cleaning functions to it in order, then returns the final result.
+Following cleaning functions will be applied in sequence:
+
+1. removefirstLetter - Remove first letter of all the tweets (as it is found that all tweets start with letter 'b').
+2. removeReTweets - Remove retweets.
+3. removeReference - Remove @ references from the tweets.
+4. stri_trans_tolower - to convert entire text to lower case.
+5. replace_abbreviation - Replace abbreviations with their full text equivalents 
+6. replace_number - Replace numbers with their word equivalents 
+7. replace_contraction - Convert contractions back to their base words 
+8. replace_symbol - Replace common symbols with their word equivalents 
+9. removePunctuation - Remove punctuations from the corpus
+10. removeWords - Remove common and customised stop words 
+11. removeURL - Remove the links (URLs) 
+12. removeSingle - Remove Single letter words
+13. stripWhitespace - Remove Extra Whitespace
+```{r}
+removeURL <- function(x) gsub("http[^[:space:]]*", "", x) 
+myStopWords<- c((stopwords('english')),c("rt", "use", "used", "via", "amp"))
+removeSingle <- function(x) gsub(" . ", " ", x)   
+removefirstLetter <- function(x) gsub("^b", " ", x)  
+removeReTweets <- function(x) gsub("(RT|via)((?:\\b\\W*@\\w+)+)", "", x)
+removeReference <- function(x) gsub("@\\w+", "", x) 
+ 
+clean_tweet = 
+clean_corpus <- function(corpus){
+  corpus <- tm_map(corpus, content_transformer(removefirstLetter)	)
+  corpus <- tm_map(corpus, content_transformer(removeReTweets))
+  corpus <- tm_map(corpus, content_transformer(removeReference))
+  corpus <- tm_map(corpus, content_transformer(stri_trans_tolower))
+  corpus <- tm_map(corpus, content_transformer(replace_abbreviation))
+  corpus <- tm_map(corpus, content_transformer(replace_number))
+  corpus <- tm_map(corpus, content_transformer(replace_contraction)	)
+  corpus <- tm_map(corpus, content_transformer(replace_symbol)	)
+  corpus <- tm_map(corpus, removePunctuation)
+  corpus <- tm_map(corpus, removeWords, myStopWords)
+  corpus <- tm_map(corpus, content_transformer(removeURL))
+  corpus <- tm_map(corpus, content_transformer(removeSingle))
+  corpus <- tm_map(corpus, stripWhitespace) 
+  return(corpus)
+}
+
+```
+### Apply the custom cleaning function to the tweets corpus (myCorpus) to create clean_corp
+```{r}
+clean_corp <- clean_corpus(myCorpus)
+```
+### Print the cleaned tweets on the console
+```{r}
+clean_corp[[10]][1]
+clean_corp[[110]][1]
+clean_corp[[500]][1]
+```
+### Make a copy of cleaned corpus for future use in document completion after stemming
+```{r}
+clean_corp_Copy <- clean_corp
+```
+### Stemming the cleaned corpus and viewing stemmed tweet ( #250)
+```{r}
+clean_corp<-tm_map(clean_corp, stemDocument)
+writeLines(strwrap(clean_corp[[250]]$content,60))
+```
+### Custom function to complete stemmed tweets 
+```{r}
+stemCompletion2 <- function(x,dictionary) {
+  x <- unlist(strsplit(as.character(x)," "))
+  x <- x[x !=""]
+  x <- stemCompletion(x, dictionary = dictionary)
+  x <- paste(x, sep="", collapse=" ")
+  PlainTextDocument(stripWhitespace(x))
+}
+```
+### Applying custom function to complete tweets after stemming
+```{r}
+clean_corp <- lapply(clean_corp, stemCompletion2, dictionary=clean_corp_Copy)
+clean_corp <- VCorpus(VectorSource(clean_corp))
+writeLines(strwrap(clean_corp[[250]]$content, 60))
+```
+### Create Document-term matix & Term-document matrix from the cleaned corpus
+```{r}
+# Create the dtm and tdm from the corpus :clean_corp
+reliance_dtm <- DocumentTermMatrix(clean_corp)
+reliance_tdm <- TermDocumentMatrix(clean_corp)
+
+```
+
+## Frequent term analysis 
+### Identify terms frequently used in the tweets for Reliance
+Following are the most frequent 50 terms used in the latest 1000 tweets of Reliance.
+```{r}
+(freq.terms <- findFreqTerms(reliance_tdm, lowfreq = 50))
+```
+### Term Frequency Chart
+A term frequency chart is plotted for 50 most frequent terms talked about the reliance. However it is observed that the term 'Reliance' appears on top of the chart since all the tweets are about Reliance. So before we derive any inferences from the results of this chart, we need to remove some keywords like Reliance and numbered text (one, nine etc ). 
+```{r}
+term.freq <- rowSums(as.matrix(reliance_tdm))
+term.freq <- subset(term.freq, term.freq > 50)
+df <- data.frame(term = names(term.freq), freq= term.freq)
+ggplot(df, aes(reorder(term, freq),freq)) + theme_bw() + geom_bar(stat = "identity")  + coord_flip() +labs(list(title="Term Frequency Chart", x="Terms", y="Term Counts")) 
+```
+
+### Removing more stop words
+We need to remove more stop words like 'Reliance','one','two' etc as they are used very frequently in all the tweets but are the keywords that do not add any value to our analysis.
+```{r}
+
+myStopWords<- c((stopwords('english')),c("reliance", "one","two","three","four","five","six","seven","eight","nine","hundred","number", "will","thousand","hai","yahan","bhar","sama",""))
+clean_corp<- tm_map(clean_corp,removeWords , myStopWords) 
+```
+### Re-building the term frequency chart
+```{r}
+reliance_tdm <- TermDocumentMatrix(clean_corp)
+term.freq <- rowSums(as.matrix(reliance_tdm))
+term.freq <- subset(term.freq, term.freq > 50)
+df <- data.frame(term = names(term.freq), freq= term.freq)
+ggplot(df, aes(reorder(term, freq),freq)) + theme_bw() + geom_bar(stat = "identity")  + coord_flip() +labs(list(title="Term Frequency Chart", x="Terms", y="Term Counts")) 
+```
+
+### Inferences based on term-frequency chart
+We could derive following inferences on the basis of term frequency chart for the 1000 tweets of reliance.
+
+1. When it comes to Reliance most of the people prefer to talk about Jio ( Reliance Jio).
+
+2. Words like 'offer', '30GB', '4G' indicates that people are interested in talking about Jio offers.
+
+3. As these tweets are collected on 30th June, word "oneindiaonegst" is also discussed frequently, GST being the hot top at this point of time.
+
+We will now carry out further analysis to get more insights from these tweets about the brand 'Reliance'
+
+## Word Cloud Analysis
+
+```{r}
+word.freq <-sort(rowSums(as.matrix(reliance_tdm)), decreasing= F)
+pal<- brewer.pal(8, "Dark2")
+wordcloud(words = names(word.freq), freq = word.freq, min.freq = 10, random.order = F, colors = pal, max.words = 100)
+```
+
+### Inferences from word cloud analysis 
+Most discussed words about Reliance are - Jio, offer, data, 30gb, submarine
+This indicates that when its comes to Reliance, Jio is the hottest toipic on social media and people are discussing Jio offers and its submarine cable system.
+
+## Making a Distance Matrix and Dendrogram from TDM
+Before we make Dendrogram from our term document matrix, we need to limit the number of words in our TDM to adjust the sparsity of the TDM, so that the generated Dendrogram is not cluttered and is easily interpretable.
+
+```{r warning=FALSE,message=FALSE}
+
+# Removing the sparse terms
+reliance_tdm_2 <- removeSparseTerms(reliance_tdm, sparse=0.975)
+
+# Create matrix
+tdm_m <- as.matrix(reliance_tdm_2)
+
+# Create dataframe
+tdm_df <- as.data.frame(tdm_m)
+
+# Create distaance matrix
+tweets_dist <- dist(tdm_df)
+
+# Create hc
+hc <- hclust(tweets_dist)
+
+# Create hcd
+hcd <- as.dendrogram(hc)
+
+# Print the labels in hcd
+labels(hcd)
+
+# Change the branch color to red for "marvin" and "gaye"
+hcd <- branches_attr_by_labels(hcd, c("marvin", "gaye"), "red")
+
+# Plot hcd
+plot(hcd, main = "Dendrogram")
+
+# Add cluster rectangles 
+rect.dendrogram(hcd, k = 2, border = "grey50")
+
+```
+
+## Word Associations
+As the next step in our analysis, we will see the association of some key words with other words in the TDM.Scores range from 0 to 1. A score of 1 means that two words always appear together, while a score of 0 means that they never appear together.
+We will see the association of following words with other words in the TDM.
+
+1. offer
+
+2. call
+
+We will use a threshold correlation value of 0.20
+```{r}
+# Create associations
+associations_offer <- findAssocs(reliance_tdm, "offer", 0.2)
+associations_data <- findAssocs(reliance_tdm, "data", 0.2)
+
+# View the venti associations
+associations_offer
+associations_data
+
+
+```
+```{r}
+# Create associations_df
+associations_offer_df <- list_vect2df(associations_offer)[, 2:3]
+associations_data_df <- list_vect2df(associations_data)[, 2:3]
+
+# Plot the associations_df values 
+ggplot(associations_offer_df, aes(y = associations_offer_df[, 1])) + 
+  geom_point(aes(x = associations_offer_df[, 2]), 
+             data = associations_offer_df, size = 3) 
+
+
+```
+```{r}
+# Plot the associations_df values 
+ggplot(associations_data_df, aes(y = associations_data_df[, 1])) + 
+  geom_point(aes(x = associations_data_df[, 2]), 
+             data = associations_data_df, size = 3) 
+
+```
+
+### Inferences from word association analysis
+As we can see from above graphs for word association of 'data'and 'offer' with other words in the tweets, we can conclude that these words appear most of the time with words like '30GB','Xioami','extra'
+This indicates that Reliance Jio's 30GB extra data offer on Xiaomi smartphones is discussed in the tweets.
+
+## bigram analysis of tweets 
+So far, we have done our analysis on TDM built using single words (also called as unigrams). Now we will analyse the tweets on TDM built on tokens containing two or more words. This can help us extracting useful phrases.
+
+We will now build the word cloud using bi-gram tokens.
+
+```{r}
+
+
+# Make tokenizer function 
+tokenizer <- function(x) 
+  NGramTokenizer(x, Weka_control(min = 2, max = 2))
+
+# Create bigram_dtm
+bigram_tdm <- TermDocumentMatrix(
+  clean_corp, 
+  control = list(tokenize = tokenizer)
+)
+
+
+
+```
+
+
+
+```{r}
+word.freq <-sort(rowSums(as.matrix(bigram_tdm)), decreasing= F)
+pal<- brewer.pal(8, "Dark2")
+wordcloud(words = names(word.freq), freq = word.freq, min.freq = 10, random.order = F, colors = pal, max.words = 10)
+```
+
+### Inferences from bigram analysis of tweets
+As seen above, bi-gram analysis provided us better insights. People prefer taking about "Jio Offer", "Xiaomi smartphone", "cable system ", "submarine cables".. etc
+
+## Topic Modeling 
+We will now try to identify some latent/hidden topics in our tweets using LDA technique.
+
+### Topic modeling using uni-gram tokens
+```{r}
+relianc_dtm <- as.DocumentTermMatrix(reliance_tdm)
+
+rowTotals <- apply(relianc_dtm , 1, sum)
+
+NullDocs <- relianc_dtm[rowTotals==0, ]
+relianc_dtm   <- relianc_dtm[rowTotals> 0, ]
+
+if (length(NullDocs$dimnames$Docs) > 0) {
+tweets.df <- tweets.df[-as.numeric(NullDocs$dimnames$Docs),]
+}
+
+lda <- LDA(relianc_dtm, k = 4) # find 5 topic
+term <- terms(lda, 5) # first 7 terms of every topic
+(term <- apply(term, MARGIN = 2, paste, collapse = ", "))
+```
+
+### Topic modeling using bi-gram tokens 
+```{r}
+relianc_dtm <- as.DocumentTermMatrix(bigram_tdm)
+
+rowTotals <- apply(relianc_dtm , 1, sum)
+
+NullDocs <- relianc_dtm[rowTotals==0, ]
+relianc_dtm   <- relianc_dtm[rowTotals> 0, ]
+
+if (length(NullDocs$dimnames$Docs) > 0) {
+tweets.df <- tweets.df[-as.numeric(NullDocs$dimnames$Docs),]
+}
+
+lda <- LDA(relianc_dtm, k = 4) # find 5 topic
+term <- terms(lda, 5) # first 7 terms of every topic
+(term <- apply(term, MARGIN = 2, paste, collapse = ", "))
+```
+
+### Inferences from Topic modeling of tweets:
+On the basis of topic modeling done using LDA technique we could identify following main topics most discussed about Reliance:
+
+#### Topic 1:  Reliance Jio's Aisa-Afric-Europe submarine cable system which stretches over thousands of km.
+
+#### Topic 2: Reliance Jio's 30 GB extra offer when used with Xiaomi smartphones.
+
+
+## Sentiment Analysis 
+We will now carry out the sentiment analysis on our tweets data to learn about the sentiments of the users about the brand Reliance.
+User's emotions about the brand Reliance will be classified under 6 categories by using Bayes algorithm.
+emotion: anger, disgust, fear, joy, sadness, and surprise
+
+Similar to emotions, we will also classify the polarity in the tweets. This process will classify the text data into four categories (pos - The absolute log likelihood of the document expressing a positive sentiment, neg - The absolute log likelihood of the document expressing a negative sentiment, pos/neg  - The ratio of absolute log likelihoods between positive and negative sentiment scores where a score of 1 indicates a neutral sentiment, less than 1 indicates a negative sentiment, and greater than 1 indicates a positive sentiment; AND best_fit - The most likely sentiment category (e.g. positive, negative, neutral) for the given text.
+we will fetch polarity category best_fit for our analysis and plot the number of tweets based on polarity classification.
+```{r}
+
+#This function helps us to analyze some text and classify it in different types of #emotion: anger, disgust, #fear, joy, sadness, and surprise
+class_emo = classify_emotion(tweets.df$Tweet, algorithm="bayes", prior=1.0)
+
+# get emotion best fit
+emotion = class_emo[,7]
+
+# replace NA's by "unknown"
+emotion[is.na(emotion)] = "unknown"
+
+# The classify_polarity function allows us to classify some text as positive or negative
+class_pol = classify_polarity(tweets.df$Tweet, algorithm="bayes")
+
+# get polarity best fit
+polarity = class_pol[,4]
+
+# Create data frame with the results and obtain some general statistics
+# data frame with results
+sent_df = data.frame(text= tweets.df$Tweet, emotion=emotion,
+polarity=polarity, stringsAsFactors=FALSE)
+
+# sort data frame
+sent_df = within(sent_df,
+emotion <- factor(emotion, levels=names(sort(table(emotion), decreasing=TRUE))))
+
+```
+
+### Sentiment Analysis of Tweets about Reliance (classification by emotion)
+```{r}
+ggplot(sent_df, aes(x=emotion)) +
+
+ geom_bar(aes(y=..count.., fill=emotion)) +
+
+ scale_fill_brewer(palette="Dark2") +
+
+ labs(x="emotion categories", y="number of tweets") +
+
+ labs(title = "Sentiment Analysis of Tweets about Reliance\n(classification by emotion)")
+```
+
+### Sentiment Analysis of Tweets about Reliance (classification by polarity)
+```{r}
+#plot distribution of polarity
+
+ggplot(sent_df, aes(x=polarity)) +
+
+ geom_bar(aes(y=..count.., fill=polarity)) +
+
+ scale_fill_brewer(palette="Dark2") +
+
+ labs(x="polarity categories", y="number of tweets") +
+
+ labs(title = "Sentiment Analysis of Tweets about Reliance\n(classification by polarity)")
+
+```
+
+### Inferences from sentiment analyis of tweets:
+1. People prefer to use more joyful words about Reliance. This is mainly because of Jio Offers as it is talked the most about Reliance.
+
+2. Out of 1000 tweets, more than 500 tweets shows positive sentiments about the brand Reliance. So we can conclude that there are positive vibes about Reliance in social media.
